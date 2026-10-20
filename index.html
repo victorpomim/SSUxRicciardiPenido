@@ -483,7 +483,8 @@
     <h1>SSU × Ricciardi &amp; Penido</h1>
     <p id="authMsg">Entre com a sua conta Google autorizada para acessar o sistema.</p>
     <div class="auth-err" id="authErr" hidden></div>
-    <button type="button" class="btn" id="signInBtn">Entrar com Google</button>
+    <button type="button" class="btn" id="signInMsBtn">Entrar com Microsoft (e-mail corporativo)</button>
+    <button type="button" class="btn secondary" id="signInBtn">Entrar com Google</button>
     <button type="button" class="btn secondary" id="switchAccountBtn" hidden>Usar outra conta</button>
   </div>
 </div>
@@ -495,7 +496,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut }
+  import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, onAuthStateChanged, signOut }
     from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import { initializeFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, getDocs, writeBatch, limit, query }
     from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -538,14 +539,21 @@
 
   function showErr(msg){ errBox.textContent = msg; errBox.hidden = !msg; }
 
-  $('signInBtn').addEventListener('click', async () => {
+  /* Microsoft restrito ao diretório (tenant) da empresa */
+  const MS_TENANT = "c9c25319-e2d6-41a6-9762-eb61031b8a1a";
+  const msProvider = new OAuthProvider('microsoft.com');
+  msProvider.setCustomParameters({ tenant: MS_TENANT, prompt: 'select_account' });
+
+  async function doSignIn(p){
     showErr('');
-    try { await signInWithPopup(auth, provider); }
+    try { await signInWithPopup(auth, p); }
     catch (e) {
       if (e && e.code === 'auth/popup-closed-by-user') return;
       showErr('Não foi possível entrar: ' + (e && e.message ? e.message : e));
     }
-  });
+  }
+  $('signInBtn').addEventListener('click', () => doSignIn(provider));
+  $('signInMsBtn').addEventListener('click', () => doSignIn(msProvider));
   $('switchAccountBtn').addEventListener('click', () => signOut(auth).then(() => location.reload()));
   $('signOutBtn').addEventListener('click', () => signOut(auth).then(() => location.reload()));
 
@@ -563,6 +571,7 @@
     } catch (e) {
       gate.hidden = false;
       $('signInBtn').hidden = true;
+      $('signInMsBtn').hidden = true;
       $('switchAccountBtn').hidden = false;
       showErr(e && e.code === 'permission-denied'
         ? 'A conta ' + user.email + ' não tem acesso a este sistema. Peça ao Victor para liberar.'
