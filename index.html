@@ -352,6 +352,18 @@
   .toast.error{ background:var(--danger); color:#fff; }
   .toast.success{ background:var(--accent); color:#fff; }
 
+  /* ---------- Conta bancária ---------- */
+  td.num.pos, td.num.neg, td.num.saldo{ white-space:nowrap; }
+  td.num.pos{ color:var(--success); }
+  td.num.neg{ color:var(--danger); }
+  td.num.saldo{ color:var(--ink-soft); }
+  .kpi-card.highlight.neg .value{ color:var(--danger); }
+  .cat-bar{ height:6px; border-radius:3px; background:var(--surface-2); margin-top:5px; overflow:hidden; }
+  .cat-bar > span{ display:block; height:100%; border-radius:3px; }
+  .cat-bar.in > span{ background:var(--success); }
+  .cat-bar.out > span{ background:var(--danger); }
+  .razao{ color:var(--ink-faint); font-size:11.5px; }
+
   /* ---------- Login (Firebase) ---------- */
   #authGate{
     position:fixed; inset:0; z-index:1000; background:var(--paper);
@@ -403,6 +415,10 @@
       <button data-tab="processos">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3h6l1 3h4v3H4V6h4l1-3z"/><path d="M4 9l1.5 10.5A2 2 0 0 0 7.5 21h9a2 2 0 0 0 2-1.5L20 9"/></svg>
         <span class="label">Processos</span>
+      </button>
+      <button data-tab="conta">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 10l9-6 9 6"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8"/><path d="M3 21h18"/></svg>
+        <span class="label">Conta bancária</span>
       </button>
       <button data-tab="despesas">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6z"/><path d="M4 6l2-3h12l2 3"/><path d="M9 11h6M9 15h6"/></svg>
@@ -483,8 +499,7 @@
     <h1>SSU × Ricciardi &amp; Penido</h1>
     <p id="authMsg">Entre com a sua conta Google autorizada para acessar o sistema.</p>
     <div class="auth-err" id="authErr" hidden></div>
-    <button type="button" class="btn" id="signInMsBtn">Entrar com Microsoft (e-mail corporativo)</button>
-    <button type="button" class="btn secondary" id="signInBtn">Entrar com Google</button>
+    <button type="button" class="btn" id="signInBtn">Entrar com Google</button>
     <button type="button" class="btn secondary" id="switchAccountBtn" hidden>Usar outra conta</button>
   </div>
 </div>
@@ -496,7 +511,7 @@
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getAuth, GoogleAuthProvider, OAuthProvider, signInWithPopup, onAuthStateChanged, signOut }
+  import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut }
     from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import { initializeFirestore, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, getDocs, writeBatch, limit, query }
     from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -539,11 +554,6 @@
 
   function showErr(msg){ errBox.textContent = msg; errBox.hidden = !msg; }
 
-  /* Microsoft restrito ao diretório (tenant) da empresa */
-  const MS_TENANT = "c9c25319-e2d6-41a6-9762-eb61031b8a1a";
-  const msProvider = new OAuthProvider('microsoft.com');
-  msProvider.setCustomParameters({ tenant: MS_TENANT, prompt: 'select_account' });
-
   async function doSignIn(p){
     showErr('');
     try { await signInWithPopup(auth, p); }
@@ -553,7 +563,6 @@
     }
   }
   $('signInBtn').addEventListener('click', () => doSignIn(provider));
-  $('signInMsBtn').addEventListener('click', () => doSignIn(msProvider));
   $('switchAccountBtn').addEventListener('click', () => signOut(auth).then(() => location.reload()));
   $('signOutBtn').addEventListener('click', () => signOut(auth).then(() => location.reload()));
 
@@ -571,7 +580,6 @@
     } catch (e) {
       gate.hidden = false;
       $('signInBtn').hidden = true;
-      $('signInMsBtn').hidden = true;
       $('switchAccountBtn').hidden = false;
       showErr(e && e.code === 'permission-denied'
         ? 'A conta ' + user.email + ' não tem acesso a este sistema. Peça ao Victor para liberar.'
@@ -672,7 +680,7 @@
   }
 
   /* ===================== State ===================== */
-  const state = { processos: [], despesas: [], honorarios: [], diligencias: [], repasses: [] };
+  const state = { processos: [], despesas: [], honorarios: [], diligencias: [], repasses: [], conta: [] };
   let dbRef = null;
   let usingLocal = false;
   let currentTab = 'dashboard';
@@ -680,7 +688,7 @@
   const openHonorarios = new Set();
   const selectedProcessos = new Set();
 
-  const COLLECTIONS = ['processos','despesas','honorarios','diligencias','repasses'];
+  const COLLECTIONS = ['processos','despesas','honorarios','diligencias','repasses','conta'];
 
   async function createDoc(col, data){
     const ref = dbRef.collection(col).doc();
@@ -888,6 +896,7 @@
     const root = document.getElementById('viewRoot');
     if (currentTab === 'dashboard') return renderDashboard(root);
     if (currentTab === 'processos') return detailProcessoId ? renderProcessoDetail(root, detailProcessoId) : renderProcessos(root);
+    if (currentTab === 'conta') return renderConta(root);
     if (currentTab === 'despesas') return renderDespesas(root);
     if (currentTab === 'honorarios') return renderHonorarios(root);
     if (currentTab === 'diligencias') return renderDiligencias(root);
@@ -922,7 +931,9 @@
 
     const ativos = state.processos.filter(p => p.status === 'ativo').length;
 
+    const saldoConta = contaSaldo();
     const kpis = [
+      { label:'Saldo em conta', value: fmtMoney(saldoConta), sub: state.conta.length ? 'conta bancária do projeto' : 'nenhum lançamento ainda', kind: saldoConta < 0 ? 'danger' : 'success' },
       { label:'A receber (honorários)', value: fmtMoney(aReceber), sub: aReceberN + ' parcela(s) em aberto' },
       { label:'Parcelas vencidas', value: fmtMoney(vencido), sub: vencidoN + ' parcela(s) vencida(s)', kind: vencidoN ? 'danger' : '' },
       { label:'Recebido este mês', value: fmtMoney(recebidoMes), sub: 'honorários quitados', kind:'success' },
@@ -1292,6 +1303,214 @@
     document.getElementById('btnAddDiligenciaDetail').onclick = () => openDiligenciaModal(null, procId);
     document.getElementById('btnAddRepasseDetail').onclick = () => openRepasseModal(null, procId);
     root.querySelectorAll('[data-parcelas]').forEach(btn => btn.onclick = () => openParcelasModal(state.honorarios.find(h => h.id === btn.dataset.parcelas)));
+  }
+
+  /* ===================== Conta bancária ===================== */
+  const CATEGORIAS_ENTRADA = ['Honorários recebidos','Reembolso de despesas','Aporte dos sócios','Rendimentos','Outra receita'];
+  const CATEGORIAS_SAIDA = ['Custas processuais','Diligências / correspondentes','Repasse a parceiro','Tarifas bancárias','Impostos','Despesas administrativas','Outra despesa'];
+  let filtroContaMes = 'todos';
+  let filtroContaTipo = 'todos';
+  let filtroContaCategoria = 'todas';
+
+  /* Valor com sinal: entrada soma, saída subtrai, ajuste já vem com sinal. */
+  function contaValorAssinado(m){
+    const v = Number(m.valor) || 0;
+    if (m.tipo === 'saida') return -Math.abs(v);
+    if (m.tipo === 'entrada') return Math.abs(v);
+    return v;
+  }
+  function contaOrdenados(){
+    return state.conta.slice().sort((a,b) =>
+      (a.data||'').localeCompare(b.data||'') || ((a.criadoEm||0) - (b.criadoEm||0)));
+  }
+  function contaSaldo(ateData){
+    return Math.round(state.conta
+      .filter(m => !ateData || (m.data||'') <= ateData)
+      .reduce((s,m) => s + contaValorAssinado(m), 0) * 100) / 100;
+  }
+  function contaTipoChip(t){
+    if (t === 'entrada') return chip('Receita','success');
+    if (t === 'saida') return chip('Débito','danger');
+    return chip('Ajuste de saldo','neutral');
+  }
+  function mesLabel(key){
+    const [y,m] = key.split('-');
+    const nomes = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+    return nomes[Number(m)-1] + '/' + y;
+  }
+
+  function contaFields(tipo, m){
+    m = m || {};
+    const procOpts = [{value:'', label:'— Nenhum (geral) —'}].concat(processoOptions());
+    if (tipo === 'ajuste') {
+      return [
+        { name:'data', label:'Data', type:'date', required:true, value:m.data || todayISO() },
+        { name:'valor', label:'Diferença lançada (R$)', type:'number', required:true, value:m.valor, hint:'positivo aumenta o saldo, negativo diminui' },
+        { name:'descricao', label:'Razão / observação', type:'text', value:m.descricao },
+      ];
+    }
+    const cats = tipo === 'entrada' ? CATEGORIAS_ENTRADA : CATEGORIAS_SAIDA;
+    return [
+      { name:'data', label:'Data', type:'date', required:true, value:m.data || todayISO() },
+      { name:'valor', label:'Valor (R$)', type:'number', required:true, value: m.valor != null ? Math.abs(Number(m.valor)) : '' },
+      { name:'categoria', label:'Categoria', type:'select', options:cats, value:m.categoria || cats[0] },
+      { name:'descricao', label:'Razão (descrição do lançamento)', type:'text', required:true, value:m.descricao, hint:'ex.: custas do recurso ordinário, honorários parcela 2/5' },
+      { name:'processoId', label:'Processo vinculado', type:'select', options:procOpts, value:m.processoId || '' },
+    ];
+  }
+
+  function openContaModal(tipo, existing){
+    const titulos = { entrada:'receita', saida:'débito', ajuste:'ajuste de saldo' };
+    openModal({
+      title: (existing ? 'Editar ' : 'Nova ') + titulos[tipo],
+      fields: contaFields(tipo, existing),
+      successMsg: existing ? 'Lançamento atualizado.' : 'Lançamento registrado.',
+      onSubmit: async (values) => {
+        if (tipo !== 'ajuste') {
+          values.valor = Math.abs(values.valor);
+          if (!values.valor) { const e = new Error('Informe um valor maior que zero.'); throw e; }
+        }
+        if (existing) await updateDocById('conta', existing.id, values);
+        else await createDoc('conta', Object.assign({ tipo, criadoEm: Date.now() }, values));
+      }
+    });
+  }
+
+  function openAtualizarSaldoModal(){
+    openModal({
+      title: 'Atualizar saldo pelo extrato',
+      fields: [
+        { name:'data', label:'Data do extrato', type:'date', required:true, value: todayISO() },
+        { name:'saldoInformado', label:'Saldo no banco (R$)', type:'number', required:true, value:'' },
+        { name:'descricao', label:'Observação', type:'text', value:'Conferência com extrato bancário' },
+      ],
+      extraHtml: '<div class="field"><span class="hint" id="ajusteHint" style="font-size:12.5px;">Saldo calculado pelo sistema nesta data: <b>' + fmtMoney(contaSaldo(todayISO())) + '</b>. A diferença entra como um lançamento de "Ajuste de saldo".</span></div>',
+      afterRender: body => {
+        const dt = body.querySelector('[name="data"]');
+        const hint = body.querySelector('#ajusteHint b');
+        dt.addEventListener('change', () => { hint.textContent = fmtMoney(contaSaldo(dt.value)); });
+      },
+      successMsg: 'Saldo atualizado.',
+      onSubmit: async (values) => {
+        const calculado = contaSaldo(values.data);
+        const diff = Math.round((values.saldoInformado - calculado) * 100) / 100;
+        if (Math.abs(diff) < 0.005) { toast('O saldo já confere com o extrato — nada a ajustar.', 'success'); return; }
+        await createDoc('conta', {
+          tipo:'ajuste', data: values.data, valor: diff, saldoInformado: values.saldoInformado,
+          categoria:'Ajuste de saldo', descricao: values.descricao || 'Conferência com extrato bancário', criadoEm: Date.now()
+        });
+      }
+    });
+  }
+
+  function renderConta(root){
+    setHeader('Conta bancária', 'Saldo da conta do projeto, com receitas e débitos e a razão de cada lançamento.',
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+        '<button class="btn secondary" id="btnAjusteSaldo">Atualizar saldo</button>' +
+        '<button class="btn secondary" id="btnNovoDebito">− Débito</button>' +
+        '<button class="btn" id="btnNovaReceita">+ Receita</button>' +
+      '</div>');
+    document.getElementById('btnNovaReceita').onclick = () => openContaModal('entrada');
+    document.getElementById('btnNovoDebito').onclick = () => openContaModal('saida');
+    document.getElementById('btnAjusteSaldo').onclick = () => openAtualizarSaldoModal();
+
+    // Saldo acumulado linha a linha (sobre todos os lançamentos, em ordem cronológica)
+    const ordenados = contaOrdenados();
+    const saldoApos = {};
+    let acc = 0;
+    ordenados.forEach(m => { acc = Math.round((acc + contaValorAssinado(m)) * 100) / 100; saldoApos[m.id] = acc; });
+    const saldoAtual = acc;
+
+    const meses = Array.from(new Set(state.conta.map(m => monthKey(m.data)).filter(Boolean))).sort().reverse();
+    const mesRef = filtroContaMes === 'todos' ? monthKey(todayISO()) : filtroContaMes;
+    let entradasMes = 0, saidasMes = 0;
+    state.conta.forEach(m => {
+      if (monthKey(m.data) !== mesRef) return;
+      if (m.tipo === 'entrada') entradasMes += Math.abs(Number(m.valor)||0);
+      if (m.tipo === 'saida') saidasMes += Math.abs(Number(m.valor)||0);
+    });
+    const ultimoAjuste = ordenados.filter(m => m.tipo === 'ajuste').pop();
+
+    const kpiHtml =
+      '<div class="kpi-card highlight' + (saldoAtual < 0 ? ' neg' : '') + '"><div class="label">Saldo atual</div><div class="value">' + fmtMoney(saldoAtual) + '</div>' +
+        '<div class="sub">' + (ultimoAjuste ? 'última conferência com extrato em ' + fmtDate(ultimoAjuste.data) : 'ainda não conferido com extrato — use "Atualizar saldo"') + '</div></div>' +
+      '<div class="kpi-grid">' +
+        '<div class="kpi-card success"><div class="label">Receitas · ' + mesLabel(mesRef) + '</div><div class="value">' + fmtMoney(entradasMes) + '</div></div>' +
+        '<div class="kpi-card danger"><div class="label">Débitos · ' + mesLabel(mesRef) + '</div><div class="value">' + fmtMoney(saidasMes) + '</div></div>' +
+        '<div class="kpi-card' + (entradasMes - saidasMes < 0 ? ' danger' : '') + '"><div class="label">Resultado · ' + mesLabel(mesRef) + '</div><div class="value">' + fmtMoney(entradasMes - saidasMes) + '</div></div>' +
+      '</div>';
+
+    // Filtros
+    let rows = ordenados.slice().reverse();
+    if (filtroContaMes !== 'todos') rows = rows.filter(m => monthKey(m.data) === filtroContaMes);
+    if (filtroContaTipo !== 'todos') rows = rows.filter(m => m.tipo === filtroContaTipo);
+    if (filtroContaCategoria !== 'todas') rows = rows.filter(m => (m.categoria || '') === filtroContaCategoria);
+
+    const opt = (v, l, cur) => '<option value="' + escapeHtml(v) + '"' + (cur === v ? ' selected' : '') + '>' + escapeHtml(l) + '</option>';
+    const toolbar =
+      '<div class="toolbar">' +
+        '<select id="fContaMes">' + opt('todos','Todos os meses',filtroContaMes) + meses.map(k => opt(k, mesLabel(k), filtroContaMes)).join('') + '</select>' +
+        '<select id="fContaTipo">' + opt('todos','Receitas e débitos',filtroContaTipo) + opt('entrada','Só receitas',filtroContaTipo) + opt('saida','Só débitos',filtroContaTipo) + opt('ajuste','Só ajustes',filtroContaTipo) + '</select>' +
+        '<select id="fContaCat">' + opt('todas','Todas as categorias',filtroContaCategoria) +
+          '<optgroup label="Receitas">' + CATEGORIAS_ENTRADA.map(c => opt(c,c,filtroContaCategoria)).join('') + '</optgroup>' +
+          '<optgroup label="Débitos">' + CATEGORIAS_SAIDA.map(c => opt(c,c,filtroContaCategoria)).join('') + '</optgroup>' +
+        '</select>' +
+        '<span class="count">' + rows.length + ' lançamento(s)</span>' +
+      '</div>';
+
+    let tableHtml;
+    if (!rows.length) {
+      tableHtml = '<div class="table-wrap"><div class="empty-state">' + (state.conta.length ? 'Nenhum lançamento para esse filtro.' : 'Nenhum lançamento ainda. Comece com "Atualizar saldo" para registrar o saldo atual do banco, depois lance receitas e débitos.') + '</div></div>';
+    } else {
+      const body = rows.map(m => {
+        const v = contaValorAssinado(m);
+        return '<tr>' +
+          '<td>' + fmtDate(m.data) + '</td>' +
+          '<td>' + contaTipoChip(m.tipo) + '</td>' +
+          '<td>' + escapeHtml(m.categoria || '—') + (m.descricao ? '<div class="razao">' + escapeHtml(m.descricao) + '</div>' : '') + '</td>' +
+          '<td>' + (m.processoId ? escapeHtml(processoLabel(m.processoId)) : '<span style="color:var(--ink-faint)">—</span>') + '</td>' +
+          '<td class="num ' + (v < 0 ? 'neg' : 'pos') + '">' + (v < 0 ? '− ' : '+ ') + fmtMoney(Math.abs(v)) + '</td>' +
+          '<td class="num saldo">' + fmtMoney(saldoApos[m.id]) + '</td>' +
+          '<td><div class="row-actions">' +
+            '<button class="icon-btn" data-edit="' + m.id + '" aria-label="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>' +
+            '<button class="icon-btn" data-del="' + m.id + '" aria-label="Excluir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M9 7V4h6v3m-8 0l1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"/></svg></button>' +
+          '</div></td>' +
+        '</tr>';
+      }).join('');
+      tableHtml = '<div class="table-wrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Categoria / razão</th><th>Processo</th><th class="num">Valor</th><th class="num">Saldo após</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>';
+    }
+
+    // Resumo por categoria (dos lançamentos filtrados)
+    function resumo(tipo, cls){
+      const tot = {};
+      rows.filter(m => m.tipo === tipo).forEach(m => { const c = m.categoria || 'Sem categoria'; tot[c] = (tot[c]||0) + Math.abs(Number(m.valor)||0); });
+      const itens = Object.entries(tot).sort((a,b) => b[1]-a[1]);
+      if (!itens.length) return '<div class="empty">Nenhum lançamento.</div>';
+      const max = itens[0][1] || 1;
+      return itens.map(([c,v]) => '<div class="mini-row" style="display:block;"><div style="display:flex;justify-content:space-between;gap:10px;"><span class="who">' + escapeHtml(c) + '</span><span class="amt">' + fmtMoney(v) + '</span></div><div class="cat-bar ' + cls + '"><span style="width:' + Math.max(2, v/max*100).toFixed(1) + '%"></span></div></div>').join('');
+    }
+    const periodo = filtroContaMes === 'todos' ? 'todo o período' : mesLabel(filtroContaMes);
+    const panels =
+      '<div class="panels" style="margin-top:18px;">' +
+        '<div class="panel"><h3>Receitas por categoria · ' + periodo + '</h3>' + resumo('entrada','in') + '</div>' +
+        '<div class="panel"><h3>Débitos por categoria · ' + periodo + '</h3>' + resumo('saida','out') + '</div>' +
+      '</div>';
+
+    root.innerHTML = kpiHtml + toolbar + tableHtml + panels;
+
+    document.getElementById('fContaMes').onchange = e => { filtroContaMes = e.target.value; render(); };
+    document.getElementById('fContaTipo').onchange = e => { filtroContaTipo = e.target.value; render(); };
+    document.getElementById('fContaCat').onchange = e => { filtroContaCategoria = e.target.value; render(); };
+    root.querySelectorAll('[data-edit]').forEach(btn => btn.onclick = () => {
+      const m = state.conta.find(x => x.id === btn.dataset.edit);
+      if (m) openContaModal(m.tipo || 'saida', m);
+    });
+    root.querySelectorAll('[data-del]').forEach(btn => btn.onclick = async () => {
+      const ok = await askConfirm('Excluir lançamento', 'O saldo será recalculado sem esse lançamento. Confirmar exclusão?');
+      if (!ok) return;
+      try { await deleteDocById('conta', btn.dataset.del); toast('Lançamento excluído.', 'success'); }
+      catch (e) { toast(friendlyError(e), 'error'); }
+    });
   }
 
   /* ===================== Despesas ===================== */
