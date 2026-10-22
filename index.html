@@ -364,6 +364,45 @@
   .cat-bar.out > span{ background:var(--danger); }
   .razao{ color:var(--ink-faint); font-size:11.5px; }
 
+  /* ---------- Sugestões ---------- */
+  .sug-form{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    box-shadow:var(--shadow); padding:16px 18px; margin-bottom:22px;
+    display:flex; flex-direction:column; gap:10px;
+  }
+  .sug-form textarea{
+    background:var(--paper); border:1px solid var(--line); color:var(--ink);
+    padding:10px 12px; border-radius:8px; font:inherit; font-size:14px;
+    min-height:76px; resize:vertical; width:100%;
+  }
+  .sug-form .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .sug-form select{
+    background:var(--surface); border:1px solid var(--line); color:var(--ink);
+    padding:8px 10px; border-radius:7px; font-size:13px;
+  }
+  .sug-form .row .btn{ margin-left:auto; }
+  .sug-form .tip{ font-size:11.5px; color:var(--ink-faint); }
+  .sug-list{ display:flex; flex-direction:column; gap:10px; }
+  .sug-item{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    padding:14px 16px; display:flex; gap:14px; align-items:flex-start;
+  }
+  .sug-item.done{ opacity:.62; }
+  .sug-item .sug-main{ flex:1; min-width:0; }
+  .sug-item .sug-text{ font-size:14px; white-space:pre-wrap; word-break:break-word; }
+  .sug-item.done .sug-text{ text-decoration:line-through; text-decoration-color:var(--ink-faint); }
+  .sug-item .sug-meta{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px; font-size:11.5px; color:var(--ink-faint); }
+  .sug-item .sug-side{ display:flex; flex-direction:column; gap:6px; align-items:flex-end; flex:none; }
+  .sug-item .sug-side select{
+    background:var(--surface); border:1px solid var(--line); color:var(--ink);
+    padding:5px 8px; border-radius:6px; font-size:12px;
+  }
+  @media (max-width:760px){
+    .sug-item{ flex-direction:column; }
+    .sug-item .sug-side{ flex-direction:row; align-items:center; width:100%; }
+    .sug-item .sug-side select{ flex:1; }
+  }
+
   /* ---------- Login (Firebase) ---------- */
   #authGate{
     position:fixed; inset:0; z-index:1000; background:var(--paper);
@@ -435,6 +474,10 @@
       <button data-tab="repasses">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 8l-4 4 4 4"/><path d="M3 12h12"/><path d="M17 8l4 4-4 4"/><path d="M21 12H9"/></svg>
         <span class="label">Repasses</span>
+      </button>
+      <button data-tab="sugestoes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1.1 1.3 1.1 2.2h5c0-.9.5-1.7 1.1-2.2A6 6 0 0 0 12 3z"/></svg>
+        <span class="label">Sugestões</span>
       </button>
     </nav>
     <div class="sidebar-foot">
@@ -680,7 +723,7 @@
   }
 
   /* ===================== State ===================== */
-  const state = { processos: [], despesas: [], honorarios: [], diligencias: [], repasses: [], conta: [] };
+  const state = { processos: [], despesas: [], honorarios: [], diligencias: [], repasses: [], conta: [], sugestoes: [] };
   let dbRef = null;
   let usingLocal = false;
   let currentTab = 'dashboard';
@@ -688,7 +731,7 @@
   const openHonorarios = new Set();
   const selectedProcessos = new Set();
 
-  const COLLECTIONS = ['processos','despesas','honorarios','diligencias','repasses','conta'];
+  const COLLECTIONS = ['processos','despesas','honorarios','diligencias','repasses','conta','sugestoes'];
 
   async function createDoc(col, data){
     const ref = dbRef.collection(col).doc();
@@ -901,6 +944,7 @@
     if (currentTab === 'honorarios') return renderHonorarios(root);
     if (currentTab === 'diligencias') return renderDiligencias(root);
     if (currentTab === 'repasses') return renderRepasses(root);
+    if (currentTab === 'sugestoes') return renderSugestoes(root);
   }
 
   /* ===================== Dashboard ===================== */
@@ -1359,6 +1403,46 @@
     ];
   }
 
+  /* ===================== Aviso por e-mail: honorários recebidos ===================== */
+  /* Os destinatários também estão fixados nas regras do Firestore (coleção mail). */
+  const EMAILS_HONORARIOS = ['victor.pomim@ssulaw.com.br', 'matheus@ssulaw.com.br', 'advlidercurso@gmail.com'];
+
+  async function notificarHonorarioRecebido(m){
+    const p = m.processoId ? state.processos.find(x => x.id === m.processoId) : null;
+    const quem = (document.getElementById('authWho') || {}).textContent || '—';
+    const linhas = [
+      ['Valor', fmtMoney(m.valor)],
+      ['Data do recebimento', fmtDate(m.data)],
+      ['Razão', m.descricao || '—'],
+      ['Processo', p ? p.numero : '— (sem processo vinculado)'],
+    ];
+    if (p) {
+      linhas.push(['Reclamante', p.cliente || '—']);
+      linhas.push(['Reclamado', p.reclamado || '—']);
+      linhas.push(['Escritório líder', p.escritorioLider || '—']);
+      linhas.push(['Responsável', p.responsavel || '—']);
+    }
+    linhas.push(['Lançado por', quem]);
+
+    const subject = 'Honorários recebidos: ' + fmtMoney(m.valor) + (p ? ' · ' + p.numero : '');
+    const text = 'Novo recebimento de honorários lançado na conta do projeto SSU × Ricciardi & Penido.\n\n' +
+      linhas.map(([k,v]) => k + ': ' + v).join('\n') +
+      '\n\nAcesse o dashboard: ' + location.origin + location.pathname;
+    const td = 'padding:8px 12px;border-bottom:1px solid #e0d8c4;font-size:14px;';
+    const html =
+      '<div style="font-family:Arial,Helvetica,sans-serif;color:#201e19;max-width:560px;">' +
+        '<p style="font-size:13px;color:#5f594c;margin:0 0 6px;">SSU × Ricciardi &amp; Penido · Trabalhista Reclamante</p>' +
+        '<h2 style="margin:0 0 4px;font-size:20px;color:#2f4a3d;">Honorários recebidos</h2>' +
+        '<p style="font-size:28px;font-weight:bold;margin:6px 0 16px;color:#1f7a54;">' + escapeHtml(fmtMoney(m.valor)) + '</p>' +
+        '<table style="border-collapse:collapse;width:100%;">' +
+          linhas.map(([k,v]) => '<tr><td style="' + td + 'color:#8b8474;width:40%;">' + escapeHtml(k) + '</td><td style="' + td + '">' + escapeHtml(v) + '</td></tr>').join('') +
+        '</table>' +
+        '<p style="margin-top:18px;"><a href="' + escapeHtml(location.origin + location.pathname) + '" style="background:#2f4a3d;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-size:14px;">Abrir dashboard</a></p>' +
+      '</div>';
+
+    await createDoc('mail', { to: EMAILS_HONORARIOS, message: { subject, text, html }, criadoEm: Date.now() });
+  }
+
   function openContaModal(tipo, existing){
     const titulos = { entrada:'receita', saida:'débito', ajuste:'ajuste de saldo' };
     openModal({
@@ -1370,8 +1454,12 @@
           values.valor = Math.abs(values.valor);
           if (!values.valor) { const e = new Error('Informe um valor maior que zero.'); throw e; }
         }
-        if (existing) await updateDocById('conta', existing.id, values);
-        else await createDoc('conta', Object.assign({ tipo, criadoEm: Date.now() }, values));
+        if (existing) { await updateDocById('conta', existing.id, values); return; }
+        await createDoc('conta', Object.assign({ tipo, criadoEm: Date.now() }, values));
+        if (tipo === 'entrada' && values.categoria === 'Honorários recebidos') {
+          try { await notificarHonorarioRecebido(values); toast('Aviso por e-mail enviado aos sócios.', 'success'); }
+          catch (e) { toast('Lançamento salvo, mas o aviso por e-mail falhou: ' + friendlyError(e), 'error'); }
+        }
       }
     });
   }
@@ -1955,10 +2043,180 @@
     });
   }
 
+  /* ===================== Sugestões & melhorias ===================== */
+  const SUG_TIPOS = [
+    { value:'melhoria', label:'Melhoria', kind:'success' },
+    { value:'bug', label:'Erro / bug', kind:'danger' },
+    { value:'ideia', label:'Nova funcionalidade', kind:'gold' },
+    { value:'layout', label:'Visual / layout', kind:'neutral' },
+  ];
+  const SUG_PRIORIDADES = [
+    { value:'alta', label:'Alta', kind:'danger' },
+    { value:'media', label:'Média', kind:'warning' },
+    { value:'baixa', label:'Baixa', kind:'neutral' },
+  ];
+  const SUG_STATUS = [
+    { value:'aberta', label:'Aberta' },
+    { value:'andamento', label:'Em andamento' },
+    { value:'feita', label:'Feita' },
+    { value:'descartada', label:'Descartada' },
+  ];
+  const SUG_ABAS = { dashboard:'Dashboard', processos:'Processos', conta:'Conta bancária', despesas:'Despesas', honorarios:'Honorários', diligencias:'Diligências', repasses:'Repasses', geral:'Geral' };
+  let filtroSugStatus = 'pendentes';
+  let filtroSugTipo = 'todos';
+  let sugRascunho = '';
+  let sugAbaOrigem = 'geral';
+
+  const findOpt = (list, v) => list.find(o => o.value === v) || list[0];
+  function usuarioAtual(){
+    const el = document.getElementById('authWho');
+    return (el && el.textContent) || '';
+  }
+  function fmtDataHora(ms){
+    if (!ms) return '';
+    const d = new Date(ms);
+    return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  }
+  function sugTexto(rows){
+    return rows.map((s, i) =>
+      (i + 1) + '. [' + findOpt(SUG_TIPOS, s.tipo).label + ' · prioridade ' + findOpt(SUG_PRIORIDADES, s.prioridade).label.toLowerCase() +
+      ' · ' + (SUG_ABAS[s.aba] || 'Geral') + '] ' + (s.texto || '').trim() +
+      (s.autor ? ' (' + s.autor + ', ' + fmtDataHora(s.criadoEm) + ')' : '')
+    ).join('\n');
+  }
+
+  function renderSugestoes(root){
+    setHeader('Sugestões & melhorias', 'Anote aqui ideias, erros e ajustes para o sistema. A equipe toda vê a lista.',
+      '<button class="btn secondary" id="btnCopiarSug">Copiar lista em aberto</button>');
+
+    const opt = (v, l, cur) => '<option value="' + escapeHtml(v) + '"' + (cur === v ? ' selected' : '') + '>' + escapeHtml(l) + '</option>';
+    const abaOpts = Object.entries(SUG_ABAS).map(([v,l]) => opt(v, l, sugAbaOrigem)).join('');
+
+    const form =
+      '<form class="sug-form" id="sugForm">' +
+        '<textarea id="sugTexto" placeholder="Descreva a sugestão ou o problema… ex.: “Na aba Honorários, permitir filtrar por escritório líder”" required>' + escapeHtml(sugRascunho) + '</textarea>' +
+        '<div class="row">' +
+          '<select id="sugTipo" aria-label="Tipo">' + SUG_TIPOS.map(t => opt(t.value, t.label, 'melhoria')).join('') + '</select>' +
+          '<select id="sugPrioridade" aria-label="Prioridade">' + SUG_PRIORIDADES.map(p => opt(p.value, 'Prioridade ' + p.label.toLowerCase(), 'media')).join('') + '</select>' +
+          '<select id="sugAba" aria-label="Tela relacionada">' + abaOpts + '</select>' +
+          '<button type="submit" class="btn" id="sugSalvar">Anotar sugestão</button>' +
+        '</div>' +
+        '<div class="tip">Dica: Ctrl+Enter salva direto.</div>' +
+      '</form>';
+
+    const pendente = s => s.status !== 'feita' && s.status !== 'descartada';
+    let rows = state.sugestoes.slice();
+    const nAbertas = rows.filter(pendente).length;
+    if (filtroSugStatus === 'pendentes') rows = rows.filter(pendente);
+    else if (filtroSugStatus !== 'todas') rows = rows.filter(s => (s.status || 'aberta') === filtroSugStatus);
+    if (filtroSugTipo !== 'todos') rows = rows.filter(s => s.tipo === filtroSugTipo);
+    const prioRank = { alta:0, media:1, baixa:2 };
+    rows.sort((a,b) => (pendente(b) - pendente(a)) || ((prioRank[a.prioridade] ?? 1) - (prioRank[b.prioridade] ?? 1)) || ((b.criadoEm||0) - (a.criadoEm||0)));
+
+    const toolbar =
+      '<div class="toolbar">' +
+        '<select id="fSugStatus">' + opt('pendentes','Em aberto e em andamento',filtroSugStatus) + opt('todas','Todas',filtroSugStatus) + SUG_STATUS.map(s => opt(s.value, 'Só ' + s.label.toLowerCase(), filtroSugStatus)).join('') + '</select>' +
+        '<select id="fSugTipo">' + opt('todos','Todos os tipos',filtroSugTipo) + SUG_TIPOS.map(t => opt(t.value, t.label, filtroSugTipo)).join('') + '</select>' +
+        '<span class="count">' + nAbertas + ' em aberto · ' + state.sugestoes.length + ' no total</span>' +
+      '</div>';
+
+    const lista = rows.length ? '<div class="sug-list">' + rows.map(s => {
+      const t = findOpt(SUG_TIPOS, s.tipo), p = findOpt(SUG_PRIORIDADES, s.prioridade);
+      const st = s.status || 'aberta';
+      const done = st === 'feita' || st === 'descartada';
+      return '<div class="sug-item' + (done ? ' done' : '') + '">' +
+        '<div class="sug-main">' +
+          '<div class="sug-text">' + escapeHtml(s.texto) + '</div>' +
+          '<div class="sug-meta">' + chip(t.label, t.kind) + chip('Prioridade ' + p.label.toLowerCase(), p.kind) +
+            (s.aba && s.aba !== 'geral' ? chip(SUG_ABAS[s.aba] || s.aba, 'neutral') : '') +
+            '<span>' + escapeHtml(s.autor || '—') + ' · ' + fmtDataHora(s.criadoEm) + '</span>' +
+            (s.concluidoEm && done ? '<span>· concluída em ' + fmtDataHora(s.concluidoEm) + '</span>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="sug-side">' +
+          '<select data-status="' + s.id + '" aria-label="Status">' + SUG_STATUS.map(o => opt(o.value, o.label, st)).join('') + '</select>' +
+          '<div class="row-actions">' +
+            '<button class="icon-btn" data-edit="' + s.id + '" aria-label="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>' +
+            '<button class="icon-btn" data-del="' + s.id + '" aria-label="Excluir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M9 7V4h6v3m-8 0l1 13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-13"/></svg></button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('') + '</div>'
+    : '<div class="table-wrap"><div class="empty-state">' + (state.sugestoes.length ? 'Nenhuma sugestão para esse filtro.' : 'Nenhuma sugestão anotada ainda.') + '</div></div>';
+
+    root.innerHTML = form + toolbar + lista;
+
+    const txt = document.getElementById('sugTexto');
+    txt.addEventListener('input', () => { sugRascunho = txt.value; });
+    document.getElementById('sugAba').onchange = e => { sugAbaOrigem = e.target.value; };
+    txt.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) document.getElementById('sugForm').requestSubmit(); });
+
+    document.getElementById('sugForm').onsubmit = async e => {
+      e.preventDefault();
+      const texto = txt.value.trim();
+      if (!texto) return;
+      const btn = document.getElementById('sugSalvar');
+      btn.disabled = true;
+      try {
+        await createDoc('sugestoes', {
+          texto,
+          tipo: document.getElementById('sugTipo').value,
+          prioridade: document.getElementById('sugPrioridade').value,
+          aba: document.getElementById('sugAba').value,
+          status: 'aberta',
+          autor: usuarioAtual(),
+          criadoEm: Date.now()
+        });
+        sugRascunho = '';
+        toast('Sugestão anotada. Obrigado!', 'success');
+      } catch (err) { toast(friendlyError(err), 'error'); btn.disabled = false; }
+    };
+
+    document.getElementById('btnCopiarSug').onclick = async () => {
+      const abertas = state.sugestoes.filter(pendente)
+        .sort((a,b) => ((prioRank[a.prioridade] ?? 1) - (prioRank[b.prioridade] ?? 1)) || ((a.criadoEm||0) - (b.criadoEm||0)));
+      if (!abertas.length) { toast('Não há sugestões em aberto.', ''); return; }
+      const texto = 'Sugestões em aberto do dashboard SSU × Ricciardi & Penido:\n\n' + sugTexto(abertas);
+      try { await navigator.clipboard.writeText(texto); toast(abertas.length + ' sugestão(ões) copiada(s).', 'success'); }
+      catch (e) { toast('Não foi possível copiar automaticamente.', 'error'); }
+    };
+
+    document.getElementById('fSugStatus').onchange = e => { filtroSugStatus = e.target.value; render(); };
+    document.getElementById('fSugTipo').onchange = e => { filtroSugTipo = e.target.value; render(); };
+    root.querySelectorAll('[data-status]').forEach(sel => sel.onchange = async () => {
+      const v = sel.value;
+      const patch = { status: v, concluidoEm: (v === 'feita' || v === 'descartada') ? Date.now() : null };
+      try { await updateDocById('sugestoes', sel.dataset.status, patch); toast('Status atualizado.', 'success'); }
+      catch (e) { toast(friendlyError(e), 'error'); }
+    });
+    root.querySelectorAll('[data-edit]').forEach(btn => btn.onclick = () => {
+      const s = state.sugestoes.find(x => x.id === btn.dataset.edit);
+      if (!s) return;
+      openModal({
+        title: 'Editar sugestão',
+        fields: [
+          { name:'texto', label:'Sugestão', type:'textarea', required:true, value:s.texto },
+          { name:'tipo', label:'Tipo', type:'select', options:SUG_TIPOS, value:s.tipo },
+          { name:'prioridade', label:'Prioridade', type:'select', options:SUG_PRIORIDADES, value:s.prioridade },
+          { name:'aba', label:'Tela relacionada', type:'select', options:Object.entries(SUG_ABAS).map(([value,label]) => ({value,label})), value:s.aba || 'geral' },
+        ],
+        successMsg: 'Sugestão atualizada.',
+        onSubmit: async values => { await updateDocById('sugestoes', s.id, values); }
+      });
+    });
+    root.querySelectorAll('[data-del]').forEach(btn => btn.onclick = async () => {
+      const ok = await askConfirm('Excluir sugestão', 'Essa ação não pode ser desfeita. Confirmar exclusão?');
+      if (!ok) return;
+      try { await deleteDocById('sugestoes', btn.dataset.del); toast('Sugestão excluída.', 'success'); }
+      catch (e) { toast(friendlyError(e), 'error'); }
+    });
+  }
+
   /* ===================== Nav wiring ===================== */
   document.getElementById('nav').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-tab]');
     if (!btn) return;
+    if (btn.dataset.tab === 'sugestoes' && currentTab !== 'sugestoes') sugAbaOrigem = currentTab;
     currentTab = btn.dataset.tab;
     detailProcessoId = null;
     selectedProcessos.clear();
