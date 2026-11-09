@@ -316,11 +316,13 @@
   .field label{ font-size:12px; font-weight:600; color:var(--ink-soft); }
   .field .hint{ font-size:11px; color:var(--ink-faint); font-weight:400; }
   .field input[type="text"], .field input[type="number"], .field input[type="date"],
-  .field select, .field textarea{
+  .field input[type="search"], .field select, .field textarea{
     background:var(--paper); border:1px solid var(--line); color:var(--ink);
     padding:9px 11px; border-radius:8px; font-size:13.5px; font-family:inherit; width:100%;
   }
   .field textarea{ resize:vertical; min-height:64px; }
+  .field .select-search{ margin-bottom:2px; }
+  .field .select-search-count{ font-size:11px; color:var(--ink-faint); }
   .field input[type="file"]{
     background:var(--paper); border:1px dashed var(--line); color:var(--ink-soft);
     padding:9px 11px; border-radius:8px; font-size:13px; width:100%;
@@ -822,9 +824,14 @@
         const ov = typeof o === 'string' ? o : o.value;
         const ol = typeof o === 'string' ? o : o.label;
         const sel = String(ov) === String(val) ? 'selected' : '';
-        return '<option value="' + escapeHtml(ov) + '" ' + sel + '>' + escapeHtml(ol) + '</option>';
+        const busca = (o && o.search) ? ' data-search="' + escapeHtml(o.search) + '"' : '';
+        return '<option value="' + escapeHtml(ov) + '" ' + sel + busca + '>' + escapeHtml(ol) + '</option>';
       }).join('');
-      return '<div class="field"><label>' + escapeHtml(f.label) + '</label><select name="' + f.name + '" ' + req + '>' + opts + '</select></div>';
+      const search = f.searchable
+        ? '<input type="search" class="select-search" data-for="' + f.name + '" placeholder="Buscar por número, reclamante, reclamado ou responsável" autocomplete="off">'
+        : '';
+      const count = f.searchable ? '<span class="select-search-count" data-count-for="' + f.name + '"></span>' : '';
+      return '<div class="field"><label>' + escapeHtml(f.label) + '</label>' + search + '<select name="' + f.name + '" ' + req + '>' + opts + '</select>' + count + '</div>';
     }
     if (f.type === 'textarea') {
       return '<div class="field"><label>' + escapeHtml(f.label) + '</label><textarea name="' + f.name + '" ' + req + '>' + escapeHtml(val) + '</textarea></div>';
@@ -839,10 +846,67 @@
     return '<div class="field"><label>' + escapeHtml(f.label) + hint + '</label><input type="' + f.type + '" name="' + f.name + '" value="' + escapeHtml(val) + '" ' + step + ' ' + list + ' ' + req + '></div>';
   }
 
+  /* Busca dentro de um select (campos com searchable:true).
+     Reconstrói as opções a cada tecla em vez de esconder com `hidden`, que o Safari ignora em <option>. */
+  function normBusca(s){ return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+
+  function wireSelectSearch(root){
+    root.querySelectorAll('.select-search').forEach(input => {
+      const select = root.querySelector('select[name="' + input.dataset.for + '"]');
+      const countEl = root.querySelector('[data-count-for="' + input.dataset.for + '"]');
+      if (!select) return;
+      const todas = Array.from(select.options).map(o => {
+        const texto = (o.dataset.search || '') + ' ' + o.textContent;
+        return { value:o.value, label:o.textContent, search:o.dataset.search || '', texto:normBusca(texto), digitos:texto.replace(/\D/g, '') };
+      });
+      const fixas = todas.filter(o => o.value === '');      // "— nenhum —" sempre visível
+      const busca = todas.filter(o => o.value !== '');
+
+      const casa = (o, termos) => termos.every(t => {
+        if (o.texto.includes(t)) return true;
+        const d = t.replace(/\D/g, '');
+        return d.length >= 3 && !/[a-z]/.test(t) && o.digitos.includes(d);
+      });
+
+      const montar = (lista, valorAtual) => {
+        select.innerHTML = '';
+        lista.forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = o.value; opt.textContent = o.label;
+          if (o.search) opt.dataset.search = o.search;
+          select.appendChild(opt);
+        });
+        const aindaExiste = lista.some(o => o.value === valorAtual);
+        select.value = aindaExiste ? valorAtual : (lista[0] ? lista[0].value : '');
+      };
+
+      input.addEventListener('input', () => {
+        const termos = normBusca(input.value).trim().split(/\s+/).filter(Boolean);
+        const anterior = select.value;
+        if (!termos.length) {
+          montar(todas, anterior);
+          if (countEl) countEl.textContent = '';
+        } else {
+          const achados = busca.filter(o => casa(o, termos));
+          const lista = achados.length
+            ? fixas.concat(achados)
+            : fixas.length ? fixas : [{ value:'', label:'Nenhum processo encontrado' }];
+          // com resultado, pré-seleciona o primeiro processo encontrado (não o "— nenhum —")
+          montar(lista, achados.some(o => o.value === anterior) ? anterior : (achados[0] ? achados[0].value : ''));
+          if (countEl) countEl.textContent = achados.length === 1 ? '1 processo encontrado' : achados.length + ' processos encontrados';
+        }
+        if (select.value !== anterior) select.dispatchEvent(new Event('change', { bubbles:true }));
+      });
+      // Enter na busca não envia o formulário
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); select.focus(); } });
+    });
+  }
+
   function openModal(cfg){
     modalTitle.textContent = cfg.title;
     modalBody.innerHTML = (cfg.fields || []).map(fieldHtml).join('') + (cfg.extraHtml || '');
     modalSubmit.textContent = cfg.submitLabel || 'Salvar';
+    wireSelectSearch(modalBody);
     if (cfg.afterRender) cfg.afterRender(modalBody);
     modalForm.onsubmit = async (e) => {
       e.preventDefault();
@@ -894,7 +958,7 @@
     return state.processos
       .slice()
       .sort((a,b) => (a.numero||'').localeCompare(b.numero||''))
-      .map(p => ({ value: p.id, label: p.numero + ' — ' + p.cliente }));
+      .map(p => ({ value: p.id, label: p.numero + ' — ' + p.cliente, search: [p.numero, p.cliente, p.reclamado, p.responsavel].filter(Boolean).join(' ') }));
   }
 
   /* ===================== Chips ===================== */
@@ -1399,7 +1463,7 @@
       { name:'valor', label:'Valor (R$)', type:'number', required:true, value: m.valor != null ? Math.abs(Number(m.valor)) : '' },
       { name:'categoria', label:'Categoria', type:'select', options:cats, value:m.categoria || cats[0] },
       { name:'descricao', label:'Razão (descrição do lançamento)', type:'text', required:true, value:m.descricao, hint:'ex.: custas do recurso ordinário, honorários parcela 2/5' },
-      { name:'processoId', label:'Processo vinculado', type:'select', options:procOpts, value:m.processoId || '' },
+      { name:'processoId', searchable:true, label:'Processo vinculado', type:'select', options:procOpts, value:m.processoId || '' },
     ];
   }
 
@@ -1608,7 +1672,7 @@
   function despesaFields(d){
     d = d || {};
     return [
-      { name:'processoId', label:'Processo', type:'select', required:true, options: processoOptions(), value:d.processoId },
+      { name:'processoId', searchable:true, label:'Processo', type:'select', required:true, options: processoOptions(), value:d.processoId },
       { name:'data', label:'Data', type:'date', required:true, value:d.data || todayISO() },
       { name:'tipo', label:'Tipo', type:'select', options:TIPOS_DESPESA, value:d.tipo || TIPOS_DESPESA[0] },
       { name:'descricao', label:'Descrição', type:'text', value:d.descricao },
@@ -1725,7 +1789,7 @@
     openModal({
       title: 'Novo honorário',
       fields: [
-        { name:'processoId', label:'Processo', type:'select', required:true, options: processoOptions(), value: presetProcessoId || '' },
+        { name:'processoId', searchable:true, label:'Processo', type:'select', required:true, options: processoOptions(), value: presetProcessoId || '' },
         { name:'tipo', label:'Tipo', type:'select', options:[{value:'fixo',label:'Fixo'},{value:'exito',label:'Êxito'},{value:'misto',label:'Misto'}], value:'fixo' },
         { name:'valorContratado', label:'Valor contratado (R$)', type:'number', required:true },
         { name:'numParcelas', label:'Número de parcelas', type:'number', value:1, hint:'mensais, a partir da 1ª data' },
@@ -1745,7 +1809,7 @@
     openModal({
       title: 'Editar honorário',
       fields: [
-        { name:'processoId', label:'Processo', type:'select', required:true, options: processoOptions(), value:h.processoId },
+        { name:'processoId', searchable:true, label:'Processo', type:'select', required:true, options: processoOptions(), value:h.processoId },
         { name:'tipo', label:'Tipo', type:'select', options:[{value:'fixo',label:'Fixo'},{value:'exito',label:'Êxito'},{value:'misto',label:'Misto'}], value:h.tipo },
         { name:'valorContratado', label:'Valor contratado (R$)', type:'number', required:true, value:h.valorContratado },
       ],
@@ -1889,7 +1953,7 @@
   function diligenciaFields(d){
     d = d || {};
     return [
-      { name:'processoId', label:'Processo', type:'select', required:true, options: processoOptions(), value:d.processoId },
+      { name:'processoId', searchable:true, label:'Processo', type:'select', required:true, options: processoOptions(), value:d.processoId },
       { name:'correspondente', label:'Correspondente / diligenciador', type:'text', required:true, value:d.correspondente },
       { name:'diligente', label:'Diligente', type:'text', value:d.diligente, hint:'pessoa que executou a diligência em campo' },
       { name:'descricao', label:'Descrição', type:'text', value:d.descricao },
@@ -1969,7 +2033,7 @@
     openModal({
       title: existing ? 'Editar repasse' : 'Novo repasse',
       fields: [
-        { name:'processoId', label:'Processo relacionado', type:'select', options: [{value:'',label:'— nenhum —'}].concat(processoOptions()), value: r.processoId || presetProcessoId || '' },
+        { name:'processoId', searchable:true, label:'Processo relacionado', type:'select', options: [{value:'',label:'— nenhum —'}].concat(processoOptions()), value: r.processoId || presetProcessoId || '' },
         { name:'destinatario', label:'Destinatário', type:'text', required:true, value:r.destinatario, list:'parceirosList', hint:'Ricciardi & Penido, SSU, correspondente etc.' },
         { name:'origemTipo', label:'Origem', type:'select', options:[{value:'diligencia',label:'Diligência'},{value:'honorario',label:'Honorário'},{value:'outro',label:'Outro'}], value:tipoInicial },
         { name:'origemId', label:'Vincular a', type:'select', options: origemOptions(tipoInicial).concat([{value:'',label:'— não vincular —'}]), value:r.origemId },
